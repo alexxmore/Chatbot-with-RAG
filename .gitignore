@@ -1,0 +1,29 @@
+# Секрети
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Дані — генеруються/зберігаються локально, не комітити
+backend/data/chroma/
+backend/data/instructions/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
