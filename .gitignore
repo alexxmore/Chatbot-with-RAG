@@ -16,6 +16,7 @@ build/
 # Дані — генеруються/зберігаються локально, не комітити
 backend/data/chroma/
 backend/data/instructions/
+Data/
 
 # Node
 node_modules/
