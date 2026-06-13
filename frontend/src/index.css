@@ -117,6 +117,10 @@ body { background: var(--bg); min-height: 100vh; }
   40% { transform: translateY(-6px); opacity: 1; }
 }
 
+/* Token usage */
+.usage-line { margin-top: 4px; font-size: 11px; color: var(--muted); max-width: 72%; }
+.status-tokens { margin-top: 6px; font-size: 13px; color: var(--muted); }
+
 /* Sources */
 .sources { margin-top: 8px; max-width: 72%; }
 .sources-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }

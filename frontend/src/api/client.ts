@@ -7,14 +7,23 @@ export interface Source {
   relevance: number;
 }
 
+export interface Usage {
+  embedding_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 export interface ChatResponse {
   answer: string;
   sources: Source[];
+  usage?: Usage;
 }
 
 export interface StatusResponse {
   status: "idle" | "running" | "done" | "error";
   message: string;
+  embedding_tokens?: number;
 }
 
 export async function sendMessage(message: string, top_k = 5): Promise<ChatResponse> {

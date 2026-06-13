@@ -6,6 +6,7 @@ interface Message {
   role: "user" | "assistant";
   text: string;
   sources?: ChatResponse["sources"];
+  usage?: ChatResponse["usage"];
   error?: boolean;
 }
 
@@ -37,7 +38,7 @@ export default function Chat() {
       const res = await sendMessage(text);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: res.answer, sources: res.sources },
+        { role: "assistant", text: res.answer, sources: res.sources, usage: res.usage },
       ]);
     } catch (err) {
       setMessages((prev) => [
@@ -68,6 +69,12 @@ export default function Chat() {
             </div>
             {msg.sources && msg.sources.length > 0 && (
               <SourceList sources={msg.sources} />
+            )}
+            {msg.usage && msg.usage.total_tokens > 0 && (
+              <div className="usage-line">
+                Токени: {msg.usage.total_tokens} (embedding {msg.usage.embedding_tokens}, промпт{" "}
+                {msg.usage.prompt_tokens}, відповідь {msg.usage.completion_tokens})
+              </div>
             )}
           </div>
         ))}

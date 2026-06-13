@@ -67,6 +67,11 @@ export default function Admin() {
           {status?.message && (
             <div className="status-message">{status.message}</div>
           )}
+          {status?.embedding_tokens != null && status.embedding_tokens > 0 && (
+            <div className="status-tokens">
+              Токени embedding (останній запуск): <strong>{status.embedding_tokens}</strong>
+            </div>
+          )}
         </div>
 
         {error && <div className="error-msg">{error}</div>}
