@@ -44,9 +44,11 @@ def _make_embed_fn():
     if settings.EMBEDDING_PROVIDER == "openai":
         oai = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-        def embed(texts: list[str]) -> list[list[float]]:
+        def embed(texts: list[str]) -> tuple[list[list[float]], int]:
+            """Return (embeddings, tokens_used)."""
             resp = oai.embeddings.create(model="text-embedding-3-small", input=texts)
-            return [item.embedding for item in resp.data]
+            tokens = resp.usage.total_tokens if resp.usage else 0
+            return [item.embedding for item in resp.data], tokens
 
         return embed
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {settings.EMBEDDING_PROVIDER}")
@@ -94,7 +96,7 @@ def _index_one(filepath: Path, collection, embed_fn) -> dict:
     except Exception:
         pass
 
-    embeddings = embed_fn(chunks)
+    embeddings, embed_tokens = embed_fn(chunks)
 
     ids, docs, metas = [], [], []
     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
@@ -125,6 +127,7 @@ def _index_one(filepath: Path, collection, embed_fn) -> dict:
         "title": title,
         "chunks": len(chunks),
         "text_length": len(text),
+        "embedding_tokens": embed_tokens,
     }
 
 
@@ -177,4 +180,5 @@ def run_indexing(html_dir: str | None = None, force: bool = False) -> dict:
         "files_processed": len(results),
         "results": results,
         "total_chunks_in_db": collection.count(),
+        "embedding_tokens": sum(r.get("embedding_tokens", 0) for r in results),
     }

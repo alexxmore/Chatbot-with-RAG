@@ -10,6 +10,10 @@ import argparse
 import sys
 from pathlib import Path
 
+# Windows consoles default to cp1251 → Ukrainian apostrophe (ʼ) etc. crash on print.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # Allow running from the backend/ directory
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -32,6 +36,7 @@ def main() -> None:
 
     print(f"Files processed    : {result['files_processed']}")
     print(f"Total chunks in DB : {result['total_chunks_in_db']}")
+    print(f"Embedding tokens   : {result.get('embedding_tokens', 0)}")
     print()
 
     for r in result["results"]:
