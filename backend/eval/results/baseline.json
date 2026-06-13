@@ -1,0 +1,14 @@
+{
+  "date": "2026-06-13T17:45:08",
+  "model": "gpt-4o-mini",
+  "judge_model": "gpt-4o-mini",
+  "runs": 3,
+  "metrics": {
+    "retrieval.recall": 1.0,
+    "quality.facts_coverage": 0.889,
+    "quality.faithfulness": 0.944,
+    "security.leak_rate": 0.0,
+    "offtopic.refusal_rate": 1.0,
+    "pii.leak_rate": 0.0
+  }
+}
