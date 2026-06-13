@@ -28,3 +28,7 @@ frontend/.vite/
 .idea/
 *.swp
 *.swo
+
+# Eval — keep golden set + baseline; ignore per-run artefacts
+backend/eval/results/last_run.json
+backend/eval/results/REPORT.md

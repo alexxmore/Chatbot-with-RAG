@@ -42,6 +42,8 @@ React UI ⇄ FastAPI ⇄ retrieval ⇄ ─────┘
 │   │   └── main.py        # FastAPI: /chat, /reindex, /status
 │   ├── index.py           # CLI: індексування
 │   ├── diagnose.py        # CLI: перевірка якості (Чекпоінти А та Б)
+│   ├── run_eval.py        # CLI: регресійний eval (golden set)
+│   ├── eval/              # golden.json, detectors, LLM-суддя, baseline
 │   ├── data/
 │   │   └── instructions/  # ← кладіть HTML-файли сюди
 │   └── requirements.txt
@@ -111,6 +113,31 @@ npm install
 npm run dev
 # UI доступне на http://localhost:5173
 ```
+
+## Регресійний eval (golden set)
+
+Перевіряє, що при зміні моделі, промпту чи бази знань **якість і безпека не
+просіли**. Запускається з CLI (не з адмінки — це інженерний quality-gate, до
+того ж кожен прогін платний). Потрібен `OPENAI_API_KEY` у `backend/.env`.
+
+```bash
+# з директорії backend/
+python run_eval.py                   # повний прогін, порівняння з baseline
+python run_eval.py --runs 5          # більше прогонів для security/offtopic/pii
+python run_eval.py --no-judge        # без LLM-судді (дешевше)
+python run_eval.py --update-baseline # зафіксувати поточні метрики як еталон
+```
+
+Міряються leak rate (injection), PII, refusal rate (offtopic), retrieval
+recall@k, покриття ключових фактів і faithfulness (LLM-суддя). `run_eval.py`
+повертає **exit code ≠ 0**, якщо провалено gate або метрика просіла відносно
+baseline — тож його можна вставити кроком у CI.
+
+Звіт: `backend/eval/results/REPORT.md`. Деталі та опис кейсів — у
+[`backend/eval/README.md`](backend/eval/README.md).
+
+> Перевірка нової моделі: змінити `LLM_MODEL` у `.env` → `python run_eval.py`.
+> Нові документи: `python index.py --force`, додати кейси в `golden.json`, прогнати.
 
 ## API
 
