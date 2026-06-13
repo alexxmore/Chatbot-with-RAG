@@ -33,6 +33,11 @@ _UK_SEGMENT_RE = re.compile(
 # Minimum script size to be considered a JS-rendered SharePoint page (bytes)
 _JS_PAGE_SCRIPT_MIN = 300_000
 
+# A Cyrillic-led segment can greedily swallow the adjacent SharePoint nav/auth JSON
+# blob (…aspx","layoutsUrl":"…","userPuid":"…"). Cut the segment at the first
+# JSON key/value boundary so author names, userPuid and other metadata never index.
+_JSON_TAIL_RE = re.compile(r'"\s*,\s*"\w+"\s*:')
+
 
 def extract_text(file_content: str, filename: str = "") -> tuple[str, str]:
     """Return (title, clean_text) from HTML or SharePoint ASPX content."""
@@ -115,7 +120,12 @@ def _extract_from_js_page(soup: BeautifulSoup) -> str:
 
     for m in _UK_SEGMENT_RE.finditer(script_text):
         segment = re.sub(r"\s+", " ", m.group(0)).strip()
-        if segment in seen:
+        # Drop the trailing SharePoint metadata JSON if it bled into this segment
+        segment = _JSON_TAIL_RE.split(segment, 1)[0].rstrip(' ",').strip()
+        # A short remainder after cutting the JSON tail is metadata residue, not
+        # content (e.g. the page-editor name that was the layoutsUrl value). The
+        # source regex already required ≥20 chars, so this only drops residue.
+        if len(segment) < 20 or segment in seen:
             continue
         # Skip obvious code/URL fragments
         if any(kw in segment for kw in ("function(", "var ", "return ", "typeof ", "http")):
