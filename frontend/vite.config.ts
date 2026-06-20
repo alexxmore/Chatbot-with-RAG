@@ -9,6 +9,7 @@ export default defineConfig({
       "/chat": "http://localhost:8000",
       "/reindex": "http://localhost:8000",
       "/status": "http://localhost:8000",
+      "/logs": "http://localhost:8000",
     },
   },
 });
