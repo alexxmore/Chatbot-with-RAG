@@ -1,0 +1,4 @@
+# Dev/test deps for the offline unit-test suite (tests/).
+# NOT needed to run the app. Installs no network/LLM deps — tests are offline.
+#   pip install -r requirements-dev.txt
+pytest==9.1.1

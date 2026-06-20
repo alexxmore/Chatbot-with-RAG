@@ -29,11 +29,20 @@ export interface StatusResponse {
   embedding_cost_usd?: number;
 }
 
-export async function sendMessage(message: string, top_k = 5): Promise<ChatResponse> {
+export interface Turn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function sendMessage(
+  message: string,
+  history: Turn[] = [],
+  top_k = 5,
+): Promise<ChatResponse> {
   const res = await fetch(`${BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, top_k }),
+    body: JSON.stringify({ message, top_k, history }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

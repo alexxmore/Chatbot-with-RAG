@@ -30,12 +30,21 @@ export default function Chat() {
     const text = input.trim();
     if (!text || loading) return;
 
+    // Conversation so far (exclude error bubbles) → lets the backend resolve
+    // follow-up questions. `messages` here is the state before this user turn.
+    // Only send once a real exchange exists (skip the standalone greeting), so the
+    // first question doesn't pay for a pointless rewrite.
+    const prior = messages
+      .filter((m) => !m.error)
+      .map((m) => ({ role: m.role, content: m.text }));
+    const history = prior.some((m) => m.role === "user") ? prior : [];
+
     setInput("");
     setMessages((prev) => [...prev, { role: "user", text }]);
     setLoading(true);
 
     try {
-      const res = await sendMessage(text);
+      const res = await sendMessage(text, history);
       setMessages((prev) => [
         ...prev,
         { role: "assistant", text: res.answer, sources: res.sources, usage: res.usage },

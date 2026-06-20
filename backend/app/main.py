@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from collections import defaultdict, deque
+from typing import Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,7 @@ from .indexing import run_indexing
 from .logging_config import get_logger, log_event, log_file_path, request_id_var, setup_logging
 from .pricing import embedding_cost
 from .query import query as rag_query
+from .retrieval import invalidate_bm25_cache
 
 setup_logging()
 logger = get_logger("rag")
@@ -93,9 +95,17 @@ def _check_rate_limit(client_host: str) -> None:
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
+class Turn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=MAX_MESSAGE_LEN)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_LEN)
     top_k: int = Field(default=5, ge=1, le=10)
+    # Prior conversation turns (oldest first); only the last few are used. Lets
+    # the backend resolve follow-ups like «а для проєктів?» into standalone queries.
+    history: list[Turn] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -115,8 +125,9 @@ def get_status() -> dict:
 def chat(req: ChatRequest, request: Request):
     _check_rate_limit(_client_host(request))
     start = time.perf_counter()
+    history = [t.model_dump() for t in req.history]
     try:
-        result = rag_query(req.message, req.top_k)
+        result = rag_query(req.message, req.top_k, history=history)
     except Exception:
         logger.exception("chat_error")
         raise HTTPException(
@@ -134,6 +145,7 @@ def chat(req: ChatRequest, request: Request):
         "sources": len(result.get("sources", [])),
         "top_k": req.top_k,
         "msg_len": len(req.message),
+        "history_turns": len(history),
     }
     if settings.LOG_PROMPTS:
         fields["message"] = req.message[:200]
@@ -147,6 +159,7 @@ def _do_reindex() -> None:
     log_event(logger, "reindex_start")
     try:
         result = run_indexing(settings.HTML_DIR)
+        invalidate_bm25_cache()  # corpus changed → drop the stale BM25 index
         indexed = sum(1 for r in result["results"] if r["status"] == "indexed")
         tokens = result.get("embedding_tokens", 0)
         cost = embedding_cost(tokens)

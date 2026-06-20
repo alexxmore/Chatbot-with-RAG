@@ -12,7 +12,10 @@ from openai import OpenAI
 
 from .cleaner import extract_text
 from .config import settings
+from .logging_config import get_logger
 from .pricing import EMBED_MODEL
+
+logger = get_logger("rag.indexing")
 
 _GLOB_PATTERNS = ("*.html", "*.htm", "*.aspx")
 
@@ -35,8 +38,44 @@ def get_collection(client: Any = None):
     c = client or _chroma_client()
     return c.get_or_create_collection(
         name="instructions",
-        metadata={"hnsw:space": "cosine"},
+        metadata={"hnsw:space": "cosine", "embedding_model": EMBED_MODEL},
     )
+
+
+def collection_embedding_model(collection) -> str | None:
+    """The embedding model a collection was built with (None for legacy/empty ones)."""
+    return (collection.metadata or {}).get("embedding_model")
+
+
+def ensure_embedding_model_compatible(collection, *, strict: bool) -> None:
+    """Guard against silently mixing vectors from different embedding models.
+
+    Vectors from different models live in different spaces, so querying a mixed
+    index returns garbage with no error. `strict=True` (indexing) raises on a
+    mismatch; otherwise (serving) it logs a warning. A legacy collection with no
+    recorded model is stamped with the current one.
+    """
+    stored = collection_embedding_model(collection)
+    if stored == EMBED_MODEL:
+        return
+    if stored is None:
+        # Fresh, or built before model-stamping existed: record the current model.
+        # Chroma's modify() rejects the immutable "hnsw:space" key and replaces the
+        # whole metadata dict, so we stamp embedding_model alone. The distance
+        # function is baked into the index at creation, so dropping that key is safe.
+        try:
+            collection.modify(metadata={"embedding_model": EMBED_MODEL})
+        except Exception:
+            pass
+        return
+    msg = (
+        f"Embedding model mismatch: this index was built with '{stored}', but the "
+        f"current model is '{EMBED_MODEL}'. Their vectors are incompatible. Delete "
+        f"'{settings.CHROMA_DIR}' and reindex, or switch the model back to '{stored}'."
+    )
+    if strict:
+        raise RuntimeError(msg)
+    logger.warning(msg)
 
 
 # ── Embedding function ────────────────────────────────────────────────────────
@@ -89,14 +128,9 @@ def _index_one(filepath: Path, collection, embed_fn) -> dict:
     if not chunks:
         return {"file": filepath.name, "status": "skipped", "reason": "no_chunks"}
 
-    # Delete previous chunks for this file
-    try:
-        existing = collection.get(where={"source_file": filepath.name})
-        if existing["ids"]:
-            collection.delete(ids=existing["ids"])
-    except Exception:
-        pass
-
+    # Embed FIRST. If the embedding call fails (timeout / 429 / network), we raise
+    # before touching the store, so the file's existing chunks are left intact —
+    # no delete-before-write gap that could wipe a document on a partial failure.
     embeddings, embed_tokens = embed_fn(chunks)
 
     ids, docs, metas = [], [], []
@@ -120,7 +154,18 @@ def _index_one(filepath: Path, collection, embed_fn) -> dict:
             "chunk_index": i,
         })
 
-    collection.add(ids=ids, documents=docs, embeddings=embeddings, metadatas=metas)
+    # Atomic-ish swap: upsert the new chunks (insert or replace by id), then prune
+    # any chunks left over from a previous, longer version of this file. The document
+    # is represented in the index at every moment — there is no empty window.
+    collection.upsert(ids=ids, documents=docs, embeddings=embeddings, metadatas=metas)
+    try:
+        existing = collection.get(where={"source_file": filepath.name})
+        new_ids = set(ids)
+        stale = [eid for eid in existing["ids"] if eid not in new_ids]
+        if stale:
+            collection.delete(ids=stale)
+    except Exception:
+        pass
 
     return {
         "file": filepath.name,
@@ -148,6 +193,7 @@ def run_indexing(html_dir: str | None = None, force: bool = False) -> dict:
 
     client = _chroma_client()
     collection = get_collection(client)
+    ensure_embedding_model_compatible(collection, strict=True)
     embed_fn = _make_embed_fn()
 
     stored_hashes = _load_hashes()

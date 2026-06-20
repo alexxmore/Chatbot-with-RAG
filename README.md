@@ -25,9 +25,18 @@ React UI ⇄ FastAPI ⇄ retrieval ⇄ ─────┘
 | Чанкінг | LangChain `RecursiveCharacterTextSplitter` |
 | Embeddings | OpenAI `text-embedding-3-small` |
 | Векторна БД | ChromaDB (embedded, persist у файл) |
+| Пошук | Гібридний: dense (ChromaDB) + BM25, злиття через RRF |
 | LLM | OpenAI ↔ OpenRouter (перемикач через `.env`) |
 | Бекенд | FastAPI |
 | Фронтенд | React + Vite |
+
+**Пошук — гібридний.** Dense-embeddings добре узагальнюють, але недооцінюють
+точні токени (назви систем: SAP, F5 BigIP, Fortinet, FZClient). BM25 ловить саме
+їх. Кандидати від обох ретриверів зливаються через Reciprocal Rank Fusion (RRF),
+після чого фільтруються за порогом косинусної відстані (`RELEVANCE_THRESHOLD`,
+відкаліброваним на golden set). **Контекст розмови:** бекенд приймає історію
+діалогу і переписує уточнювальні запитання («а для проєктів?») у самодостатні
+перед пошуком.
 
 ## Структура репозиторію
 
@@ -37,16 +46,21 @@ React UI ⇄ FastAPI ⇄ retrieval ⇄ ─────┘
 │   ├── app/
 │   │   ├── config.py      # Pydantic Settings (читає .env)
 │   │   ├── cleaner.py     # HTML/ASPX → чистий текст
-│   │   ├── indexing.py    # chunking + embeddings + ChromaDB
-│   │   ├── query.py       # retrieval + LLM
-│   │   └── main.py        # FastAPI: /chat, /reindex, /status
+│   │   ├── indexing.py    # chunking + embeddings + ChromaDB (атомарний reindex)
+│   │   ├── retrieval.py   # гібридний пошук: dense + BM25, RRF-злиття
+│   │   ├── query.py       # retrieval + query-rewrite + LLM
+│   │   └── main.py        # FastAPI: /chat, /reindex, /status, /logs
 │   ├── index.py           # CLI: індексування
 │   ├── diagnose.py        # CLI: перевірка якості (Чекпоінти А та Б)
 │   ├── run_eval.py        # CLI: регресійний eval (golden set)
+│   ├── tools/
+│   │   └── calibrate_threshold.py  # калібрування RELEVANCE_THRESHOLD
 │   ├── eval/              # golden.json, detectors, LLM-суддя, baseline
+│   ├── tests/             # офлайн pytest-набір (без мережі/LLM)
 │   ├── data/
 │   │   └── instructions/  # ← кладіть HTML-файли сюди
-│   └── requirements.txt
+│   ├── requirements.txt
+│   └── requirements-dev.txt  # pytest (для tests/)
 ├── frontend/              # React + Vite
 ├── .env.example
 ├── .gitignore
@@ -114,6 +128,36 @@ npm run dev
 # UI доступне на http://localhost:5173
 ```
 
+## Тести
+
+Офлайн-набір (без мережі та LLM) покриває найкрихкіше: регекс-екстракцію
+HTML/ASPX (`cleaner`), розрахунок вартості (`pricing`), детектори гейтів,
+атомарність реіндексації + гард сумісності embedding-моделі, та гібридний пошук.
+
+```bash
+# з директорії backend/
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Запускаються автоматично в CI (`.github/workflows/tests.yml`) на кожен push/PR.
+
+## Калібрування порогу релевантності
+
+`RELEVANCE_THRESHOLD` (косинусна відстань) визначає, що вважати релевантним.
+Замість магічного числа його калібрують на golden set — лише через ретривал
+(embeddings, без генерації відповідей, тож майже безкоштовно):
+
+```bash
+# з директорії backend/
+python tools/calibrate_threshold.py
+```
+
+Інструмент проганяє кожен golden-кейс і для діапазону порогів показує factual
+recall, частку відповіданих питань і частку відмов на offtopic, після чого
+рекомендує найбільший поріг, що ще відсікає 100% offtopic. Звіт:
+`backend/eval/results/threshold_calibration.md`.
+
 ## Регресійний eval (golden set)
 
 Перевіряє, що при зміні моделі, промпту чи бази знань **якість і безпека не
@@ -143,7 +187,7 @@ baseline — тож його можна вставити кроком у CI.
 
 | Метод | Ендпоінт | Опис |
 |---|---|---|
-| `POST` | `/chat` | `{message, top_k?}` → `{answer, sources}` |
+| `POST` | `/chat` | `{message, top_k?, history?}` → `{answer, sources, usage}` |
 | `POST` | `/reindex` | Запуск індексування у фоні (лише localhost) |
 | `GET` | `/status` | Статус індексування |
 | `GET` | `/logs` | Останні події логу, `?limit=&level=` (лише localhost) |
@@ -187,6 +231,13 @@ LLM_MODEL=gpt-4o-mini
 
 HTML_DIR=./data/instructions
 CHROMA_DIR=./data/chroma
+
+RELEVANCE_THRESHOLD=0.70         # косинусна відстань; калібрується tools/calibrate_threshold.py
+DENSE_POOL=20                    # к-сть dense-кандидатів до злиття
+BM25_POOL=20                     # к-сть BM25-кандидатів до злиття
 ```
 
-> **Увага:** `EMBEDDING_PROVIDER` прив'язаний до бази. Якщо змінити його після індексації — потрібна повна переіндексація (`python index.py --force`).
+> **Увага:** embedding-модель прив'язана до бази (вектори різних моделей несумісні).
+> Її імʼя зберігається в metadata колекції; при спробі реіндексації з іншою моделлю
+> поверх наявних даних `run_indexing` **кине явну помилку** замість тихого псування
+> індексу. Щоб змінити модель — видаліть `CHROMA_DIR` і переіндексуйте з нуля.
