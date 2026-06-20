@@ -1,4 +1,5 @@
-"""FastAPI application: /chat, /reindex, /status."""
+"""FastAPI application: /chat, /reindex, /status, /logs."""
+import json
 import logging
 import time
 import uuid
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .config import settings
 from .indexing import run_indexing
-from .logging_config import get_logger, log_event, request_id_var, setup_logging
+from .logging_config import get_logger, log_event, log_file_path, request_id_var, setup_logging
 from .pricing import embedding_cost
 from .query import query as rag_query
 
@@ -21,6 +22,11 @@ http_logger = get_logger("rag.http")
 app = FastAPI(title="RAG Support Chatbot", version="1.0.0")
 
 
+# High-frequency polling endpoints — skipped in the access log to keep it useful
+# (and to avoid log-viewing generating its own log spam).
+_ACCESS_LOG_SKIP = {"/status", "/logs"}
+
+
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     """Assign a request_id, time the request, and emit one access log line."""
@@ -29,14 +35,15 @@ async def request_context(request: Request, call_next):
     start = time.perf_counter()
     try:
         response = await call_next(request)
-        log_event(
-            http_logger,
-            "http_request",
-            method=request.method,
-            path=request.url.path,
-            status=response.status_code,
-            latency_ms=round((time.perf_counter() - start) * 1000, 1),
-        )
+        if request.url.path not in _ACCESS_LOG_SKIP:
+            log_event(
+                http_logger,
+                "http_request",
+                method=request.method,
+                path=request.url.path,
+                status=response.status_code,
+                latency_ms=round((time.perf_counter() - start) * 1000, 1),
+            )
         response.headers["X-Request-ID"] = rid
         return response
     finally:
@@ -53,8 +60,14 @@ app.add_middleware(
 # mutable singleton for indexing state
 _idx_status: dict = {"status": "idle", "message": "Індексування ще не запускалось"}
 
-# Reindex is an expensive (paid) operation → only callable from the local machine.
+# Operator-only endpoints (reindex, logs) → only callable from the local machine.
+# No auth by design: single-operator project, not exposed publicly.
 _LOCALHOST = {"127.0.0.1", "::1", "localhost"}
+
+
+def _require_localhost(request: Request, detail: str = "Доступно лише з локальної машини.") -> None:
+    if _client_host(request) not in _LOCALHOST:
+        raise HTTPException(status_code=403, detail=detail)
 
 # Limits to prevent cost-amplification abuse of the paid /chat endpoint.
 MAX_MESSAGE_LEN = 4000
@@ -164,12 +177,36 @@ def _do_reindex() -> None:
 
 @app.post("/reindex")
 def reindex(request: Request, background_tasks: BackgroundTasks):
-    if _client_host(request) not in _LOCALHOST:
-        raise HTTPException(
-            status_code=403,
-            detail="Реіндексація доступна лише з локальної машини.",
-        )
+    _require_localhost(request, "Реіндексація доступна лише з локальної машини.")
     if _idx_status.get("status") == "running":
         return {"detail": "Індексування вже виконується."}
     background_tasks.add_task(_do_reindex)
     return {"detail": "Індексування запущено у фоновому режимі."}
+
+
+@app.get("/logs")
+def get_logs(request: Request, limit: int = 100, level: str | None = None) -> dict:
+    """Recent log events (newest first), for the local admin panel only."""
+    _require_localhost(request)
+    limit = max(1, min(limit, 1000))
+    want_level = level.upper() if level else None
+
+    path = log_file_path()
+    if not path.exists():
+        return {"events": []}
+
+    events: list[dict] = []
+    for line in reversed(path.read_text("utf-8", errors="replace").splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if want_level and ev.get("level") != want_level:
+            continue
+        events.append(ev)
+        if len(events) >= limit:
+            break
+    return {"events": events}

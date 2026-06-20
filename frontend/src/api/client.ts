@@ -53,3 +53,20 @@ export async function getStatus(): Promise<StatusResponse> {
   if (!res.ok) throw new Error("Помилка отримання статусу");
   return res.json();
 }
+
+export interface LogEntry {
+  ts: string;
+  level: string;
+  logger: string;
+  event: string;
+  request_id?: string;
+  [key: string]: unknown;
+}
+
+export async function getLogs(limit = 100, level?: string): Promise<{ events: LogEntry[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (level) params.set("level", level);
+  const res = await fetch(`${BASE}/logs?${params.toString()}`);
+  if (!res.ok) throw new Error("Не вдалося отримати логи (доступно лише локально)");
+  return res.json();
+}

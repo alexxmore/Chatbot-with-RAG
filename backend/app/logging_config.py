@@ -25,6 +25,10 @@ _LOGGER_NAME = "rag"
 _configured = False
 
 
+def log_file_path() -> Path:
+    return Path(settings.LOG_DIR) / "app.log"
+
+
 class JsonFormatter(logging.Formatter):
     """Render each record as a single JSON object (one line = one event)."""
 
@@ -64,10 +68,10 @@ def setup_logging() -> None:
     console.setFormatter(fmt)
     logger.addHandler(console)
 
-    log_dir = Path(settings.LOG_DIR)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_file_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     file_handler = RotatingFileHandler(
-        log_dir / "app.log", maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+        log_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
     )
     file_handler.setFormatter(fmt)
     logger.addHandler(file_handler)

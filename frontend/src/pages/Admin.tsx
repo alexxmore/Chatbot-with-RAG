@@ -1,10 +1,40 @@
 import { useEffect, useState } from "react";
-import { getStatus, triggerReindex, type StatusResponse } from "../api/client";
+import {
+  getLogs,
+  getStatus,
+  triggerReindex,
+  type LogEntry,
+  type StatusResponse,
+} from "../api/client";
+
+const KNOWN_LOG_KEYS = new Set(["ts", "level", "logger", "event", "request_id"]);
+
+function logExtras(ev: LogEntry): string {
+  return Object.entries(ev)
+    .filter(([k]) => !KNOWN_LOG_KEYS.has(k))
+    .map(([k, v]) => `${k}=${String(v)}`)
+    .join("  ");
+}
+
+function logTime(ts: string): string {
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? ts : d.toLocaleTimeString();
+}
+
+function levelColor(level: string): string {
+  if (level === "ERROR") return "var(--red)";
+  if (level === "WARNING") return "var(--yellow)";
+  return "var(--muted)";
+}
 
 export default function Admin() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logLevel, setLogLevel] = useState("");
+  const [logError, setLogError] = useState("");
 
   async function fetchStatus() {
     try {
@@ -15,9 +45,24 @@ export default function Admin() {
     }
   }
 
+  async function fetchLogs() {
+    try {
+      const { events } = await getLogs(100, logLevel || undefined);
+      setLogs(events);
+      setLogError("");
+    } catch (err) {
+      setLogError(err instanceof Error ? err.message : "Помилка завантаження логів");
+    }
+  }
+
   useEffect(() => {
     fetchStatus();
   }, []);
+
+  useEffect(() => {
+    fetchLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logLevel]);
 
   // Poll while indexing is running
   useEffect(() => {
@@ -92,6 +137,58 @@ export default function Admin() {
         <button className="refresh-btn" onClick={fetchStatus}>
           Оновити статус
         </button>
+      </div>
+
+      <div className="admin-card logs-card">
+        <div className="logs-header">
+          <h2>Останні події</h2>
+          <select
+            className="logs-filter"
+            value={logLevel}
+            onChange={(e) => setLogLevel(e.target.value)}
+          >
+            <option value="">Усі рівні</option>
+            <option value="INFO">INFO</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+          <button className="refresh-btn logs-refresh" onClick={fetchLogs}>
+            Оновити
+          </button>
+        </div>
+
+        {logError && <div className="error-msg">{logError}</div>}
+
+        {!logError && logs.length === 0 && (
+          <div className="admin-desc">Подій ще немає.</div>
+        )}
+
+        {logs.length > 0 && (
+          <div className="logs-table-wrap">
+            <table className="logs-table">
+              <thead>
+                <tr>
+                  <th>Час</th>
+                  <th>Рівень</th>
+                  <th>Подія</th>
+                  <th>Деталі</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((ev, i) => (
+                  <tr key={i}>
+                    <td className="logs-time">{logTime(ev.ts)}</td>
+                    <td style={{ color: levelColor(ev.level), fontWeight: 600 }}>
+                      {ev.level}
+                    </td>
+                    <td className="logs-event">{ev.event}</td>
+                    <td className="logs-extra">{logExtras(ev)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
