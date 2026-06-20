@@ -1,13 +1,17 @@
 """RAG query pipeline: embed → retrieve → generate."""
 from __future__ import annotations
 
+import logging
 import re
 
 from openai import OpenAI
 
 from .config import settings
 from .indexing import _make_embed_fn, get_collection, _chroma_client
+from .logging_config import get_logger, log_event
 from .pricing import chat_cost
+
+logger = get_logger("rag.query")
 
 _SYSTEM_PROMPT = """Ти — консультант технічної підтримки. Відповідай на основі наданого контексту з бази знань.
 
@@ -95,6 +99,7 @@ def query(user_message: str, top_k: int = 6) -> dict:
     collection = get_collection(_chroma_client())
 
     if collection.count() == 0:
+        log_event(logger, "refusal", reason="empty_index")
         return {
             "answer": "База знань порожня. Спочатку виконайте індексування.",
             "sources": [],
@@ -123,6 +128,7 @@ def query(user_message: str, top_k: int = 6) -> dict:
     ]
 
     if not relevant:
+        log_event(logger, "refusal", reason="no_relevant_context")
         return {
             "answer": "Я не маю інформації з цього питання в базі знань.",
             "sources": [],
@@ -180,10 +186,14 @@ def query(user_message: str, top_k: int = 6) -> dict:
 
     # Output guardrail: never return a response that leaked the system prompt.
     if _leaks_system_prompt(answer):
+        log_event(logger, "prompt_leak_blocked", level=logging.WARNING)
         return {"answer": _REFUSAL, "sources": [], "usage": usage, "context": context}
 
     # Output PII scrubber: strip any leaked SharePoint metadata.
-    answer = _scrub_pii(answer)
+    scrubbed = _scrub_pii(answer)
+    if scrubbed != answer:
+        log_event(logger, "pii_scrubbed", level=logging.WARNING)
+    answer = scrubbed
 
     # `context` is consumed by the eval harness (faithfulness judge); the API
     # response_model (ChatResponse) drops it, so it never reaches HTTP clients.

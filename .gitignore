@@ -33,3 +33,7 @@ frontend/.vite/
 backend/eval/results/last_run.json
 backend/eval/results/REPORT.md
 backend/eval/results/ragas_last_run.json
+
+# Logs
+backend/logs/
+logs/

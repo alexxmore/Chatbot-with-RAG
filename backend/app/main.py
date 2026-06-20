@@ -1,6 +1,7 @@
 """FastAPI application: /chat, /reindex, /status."""
 import logging
 import time
+import uuid
 from collections import defaultdict, deque
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -9,12 +10,37 @@ from pydantic import BaseModel, Field
 
 from .config import settings
 from .indexing import run_indexing
+from .logging_config import get_logger, log_event, request_id_var, setup_logging
 from .pricing import embedding_cost
 from .query import query as rag_query
 
-logger = logging.getLogger("rag")
+setup_logging()
+logger = get_logger("rag")
+http_logger = get_logger("rag.http")
 
 app = FastAPI(title="RAG Support Chatbot", version="1.0.0")
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """Assign a request_id, time the request, and emit one access log line."""
+    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    token = request_id_var.set(rid)
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+        log_event(
+            http_logger,
+            "http_request",
+            method=request.method,
+            path=request.url.path,
+            status=response.status_code,
+            latency_ms=round((time.perf_counter() - start) * 1000, 1),
+        )
+        response.headers["X-Request-ID"] = rid
+        return response
+    finally:
+        request_id_var.reset(token)
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,6 +73,7 @@ def _check_rate_limit(client_host: str) -> None:
     while dq and now - dq[0] > _RATE_WINDOW:
         dq.popleft()
     if len(dq) >= _RATE_LIMIT:
+        log_event(logger, "rate_limited", level=logging.WARNING, client_ip=client_host)
         raise HTTPException(status_code=429, detail="Забагато запитів. Зачекайте трохи.")
     dq.append(now)
 
@@ -78,24 +105,47 @@ def chat(req: ChatRequest, request: Request):
     try:
         result = rag_query(req.message, req.top_k)
     except Exception:
-        logger.exception("chat query failed")
+        logger.exception("chat_error")
         raise HTTPException(
             status_code=500,
             detail="Внутрішня помилка сервера. Спробуйте пізніше.",
         )
     # Latency of the full RAG pipeline (embed → retrieve → generate).
-    result.setdefault("usage", {})["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+    usage = result.setdefault("usage", {})
+    usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+
+    fields = {
+        "tokens": usage.get("total_tokens", 0),
+        "cost_usd": usage.get("cost_usd"),
+        "latency_ms": usage["latency_ms"],
+        "sources": len(result.get("sources", [])),
+        "top_k": req.top_k,
+        "msg_len": len(req.message),
+    }
+    if settings.LOG_PROMPTS:
+        fields["message"] = req.message[:200]
+    log_event(logger, "chat", **fields)
     return result
 
 
 def _do_reindex() -> None:
     global _idx_status
     _idx_status = {"status": "running", "message": "Індексування виконується…"}
+    log_event(logger, "reindex_start")
     try:
         result = run_indexing(settings.HTML_DIR)
         indexed = sum(1 for r in result["results"] if r["status"] == "indexed")
         tokens = result.get("embedding_tokens", 0)
         cost = embedding_cost(tokens)
+        log_event(
+            logger,
+            "reindex_done",
+            files=result["files_processed"],
+            indexed=indexed,
+            chunks=result["total_chunks_in_db"],
+            embedding_tokens=tokens,
+            cost_usd=cost,
+        )
         _idx_status = {
             "status": "done",
             "message": (
@@ -108,7 +158,7 @@ def _do_reindex() -> None:
             "embedding_cost_usd": cost,
         }
     except Exception as exc:
-        logger.exception("reindex failed")
+        logger.exception("reindex_error")
         _idx_status = {"status": "error", "message": f"Помилка індексування: {type(exc).__name__}"}
 
 
