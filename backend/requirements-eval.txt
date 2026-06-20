@@ -1,0 +1,7 @@
+# Optional deps for the supplementary RAGAS eval (run_ragas_eval.py).
+# NOT needed to run the app or the core regression harness (run_eval.py).
+#   pip install -r requirements-eval.txt
+# RAGAS 0.2 API (EvaluationDataset, ResponseRelevancy, ...). Pinned to the 0.2
+# minor; bump deliberately and re-check the metric column names if you upgrade.
+ragas>=0.2,<0.3
+langchain-openai>=0.2,<0.3

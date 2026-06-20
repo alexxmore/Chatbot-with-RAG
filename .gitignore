@@ -32,3 +32,4 @@ frontend/.vite/
 # Eval — keep golden set + baseline; ignore per-run artefacts
 backend/eval/results/last_run.json
 backend/eval/results/REPORT.md
+backend/eval/results/ragas_last_run.json

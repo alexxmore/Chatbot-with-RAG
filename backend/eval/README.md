@@ -45,6 +45,31 @@ python run_eval.py --update-baseline # зафіксувати поточні м�
 метрика просіла відносно baseline більш ніж на 0.05. Тобто його можна ставити
 кроком у CI перед мерджем зміни промпту/моделі/бази.
 
+## Додатковий шар: RAGAS (необовʼязковий)
+
+Окремий скрипт `run_ragas_eval.py` рахує дві метрики, яких немає в основному
+харнесі, за допомогою впізнаваного фреймворку **RAGAS**. Він **не замінює**
+`run_eval.py` і не має gate'ів — це доповнення для повноти оцінювання.
+
+| Метрика | Що показує |
+|---|---|
+| `answer_relevancy` | чи відповідь справді відповідає на питання |
+| `context_precision` | чи релевантні чанки стоять угорі видачі retrieval |
+
+Ганяються лише `factual`-кейси (для injection/offtopic/pii немає «релевантного
+контексту»). Золотий набір не містить еталонних відповідей, тому використано
+reference-free варіанти метрик RAGAS.
+
+```bash
+cd backend
+pip install -r requirements-eval.txt   # ragas + langchain-openai (важкі, окремо)
+python run_ragas_eval.py               # звіт → eval/results/ragas_last_run.json
+python run_ragas_eval.py --judge-model gpt-4o   # суворіша оцінка
+```
+
+Потрібен `OPENAI_API_KEY` у `.env` (метрики LLM/embedding-based → кілька центів
+за прогін). Результат — `eval/results/ragas_last_run.json` (не комітиться).
+
 ## Як перевіряти нову модель або нові документи
 
 1. Нова модель: змінити `LLM_MODEL` у `.env` → `python run_eval.py`. Порівняти з
