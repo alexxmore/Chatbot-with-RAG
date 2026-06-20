@@ -12,6 +12,7 @@ from openai import OpenAI
 
 from .cleaner import extract_text
 from .config import settings
+from .pricing import EMBED_MODEL
 
 _GLOB_PATTERNS = ("*.html", "*.htm", "*.aspx")
 
@@ -46,7 +47,7 @@ def _make_embed_fn():
 
         def embed(texts: list[str]) -> tuple[list[list[float]], int]:
             """Return (embeddings, tokens_used)."""
-            resp = oai.embeddings.create(model="text-embedding-3-small", input=texts)
+            resp = oai.embeddings.create(model=EMBED_MODEL, input=texts)
             tokens = resp.usage.total_tokens if resp.usage else 0
             return [item.embedding for item in resp.data], tokens
 

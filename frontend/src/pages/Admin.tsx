@@ -70,6 +70,9 @@ export default function Admin() {
           {status?.embedding_tokens != null && status.embedding_tokens > 0 && (
             <div className="status-tokens">
               Токени embedding (останній запуск): <strong>{status.embedding_tokens}</strong>
+              {status.embedding_cost_usd != null && (
+                <> · вартість <strong>${status.embedding_cost_usd.toFixed(4)}</strong></>
+              )}
             </div>
           )}
         </div>

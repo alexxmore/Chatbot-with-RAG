@@ -74,6 +74,12 @@ export default function Chat() {
               <div className="usage-line">
                 Токени: {msg.usage.total_tokens} (embedding {msg.usage.embedding_tokens}, промпт{" "}
                 {msg.usage.prompt_tokens}, відповідь {msg.usage.completion_tokens})
+                {msg.usage.cost_usd != null && (
+                  <> · Вартість: ${msg.usage.cost_usd.toFixed(6)}</>
+                )}
+                {msg.usage.latency_ms != null && (
+                  <> · Затримка: {Math.round(msg.usage.latency_ms)} мс</>
+                )}
               </div>
             )}
           </div>

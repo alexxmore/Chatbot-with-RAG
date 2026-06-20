@@ -12,6 +12,8 @@ export interface Usage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  cost_usd?: number | null;
+  latency_ms?: number;
 }
 
 export interface ChatResponse {
@@ -24,6 +26,7 @@ export interface StatusResponse {
   status: "idle" | "running" | "done" | "error";
   message: string;
   embedding_tokens?: number;
+  embedding_cost_usd?: number;
 }
 
 export async function sendMessage(message: string, top_k = 5): Promise<ChatResponse> {

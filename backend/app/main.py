@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .config import settings
 from .indexing import run_indexing
+from .pricing import embedding_cost
 from .query import query as rag_query
 
 logger = logging.getLogger("rag")
@@ -73,14 +74,18 @@ def get_status() -> dict:
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, request: Request):
     _check_rate_limit(_client_host(request))
+    start = time.perf_counter()
     try:
-        return rag_query(req.message, req.top_k)
+        result = rag_query(req.message, req.top_k)
     except Exception:
         logger.exception("chat query failed")
         raise HTTPException(
             status_code=500,
             detail="Внутрішня помилка сервера. Спробуйте пізніше.",
         )
+    # Latency of the full RAG pipeline (embed → retrieve → generate).
+    result.setdefault("usage", {})["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+    return result
 
 
 def _do_reindex() -> None:
@@ -90,15 +95,17 @@ def _do_reindex() -> None:
         result = run_indexing(settings.HTML_DIR)
         indexed = sum(1 for r in result["results"] if r["status"] == "indexed")
         tokens = result.get("embedding_tokens", 0)
+        cost = embedding_cost(tokens)
         _idx_status = {
             "status": "done",
             "message": (
                 f"Готово. Оброблено {result['files_processed']} файлів "
                 f"({indexed} нових/змінених), "
                 f"всього {result['total_chunks_in_db']} чанків у базі. "
-                f"Витрачено {tokens} токенів embedding."
+                f"Витрачено {tokens} токенів embedding (~${cost:.4f})."
             ),
             "embedding_tokens": tokens,
+            "embedding_cost_usd": cost,
         }
     except Exception as exc:
         logger.exception("reindex failed")

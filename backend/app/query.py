@@ -7,6 +7,7 @@ from openai import OpenAI
 
 from .config import settings
 from .indexing import _make_embed_fn, get_collection, _chroma_client
+from .pricing import chat_cost
 
 _SYSTEM_PROMPT = """Ти — консультант технічної підтримки. Відповідай на основі наданого контексту з бази знань.
 
@@ -84,6 +85,7 @@ def _usage(embedding_tokens: int = 0, prompt_tokens: int = 0, completion_tokens:
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": embedding_tokens + prompt_tokens + completion_tokens,
+        "cost_usd": chat_cost(embedding_tokens, prompt_tokens, completion_tokens, settings.LLM_MODEL),
     }
 
 
